@@ -9,6 +9,67 @@ st.set_page_config(
     layout="centered"
 )
 
+# --- ESTILOS CSS PERSONALIZADOS ---
+st.markdown("""
+<style>
+/* 1. Ocultar barra superior de Streamlit (Share, estrella, GitHub, menú) */
+header[data-testid="stHeader"] {
+    display: none !important;
+}
+#MainMenu {
+    visibility: hidden !important;
+}
+footer {
+    visibility: hidden !important;
+}
+.stDeployButton {
+    display: none !important;
+}
+div[data-testid="stToolbar"] {
+    display: none !important;
+}
+
+/* 2. Aumentar tamaño de textos descriptivos y etiquetas */
+.subtitulo-grande {
+    font-size: 1.25rem !important;
+    line-height: 1.5 !important;
+    color: #E0E0E0 !important;
+    margin-bottom: 1.5rem !important;
+}
+div[data-testid="stFileUploader"] label p {
+    font-size: 1.2rem !important;
+    font-weight: 600 !important;
+    color: #FFFFFF !important;
+    margin-bottom: 0.5rem !important;
+}
+div[data-testid="stNumberInput"] label p,
+div[data-testid="stTextInput"] label p,
+div[data-testid="stCheckbox"] label p {
+    font-size: 1.05rem !important;
+}
+
+/* 3. Cápsula grande y muy visible para subir el PDF */
+div[data-testid="stFileUploader"] section {
+    padding: 2.5rem 2rem !important;
+    min-height: 150px !important;
+    border: 2px dashed #4DA6FF !important;
+    border-radius: 16px !important;
+    background-color: rgba(77, 166, 255, 0.08) !important;
+    transition: all 0.2s ease-in-out;
+}
+div[data-testid="stFileUploader"] section:hover {
+    border-color: #FFD700 !important;
+    background-color: rgba(255, 215, 0, 0.10) !important;
+}
+div[data-testid="stFileUploader"] button {
+    font-size: 1.1rem !important;
+    padding: 0.6rem 1.4rem !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # --- FUNCIONES DE EXTRACCIÓN ---
 def extraer_texto_pdf(archivo_pdf):
     texto_completo = ""
@@ -34,13 +95,12 @@ def analizar_datos_factura(texto):
     if not texto:
         return datos
 
-    # 1. Detectar CUPS (Formato ES + 18 dígitos + 2 letras)
+    # 1. Detectar CUPS (Formato ES + 16 dígitos + 2-4 caracteres)
     match_cups = re.search(r'\bES\d{16}[A-Z0-9]{2,4}\b', texto.replace(" ", ""))
     if match_cups:
         datos["cups"] = match_cups.group(0)
 
     # 2. Detectar Potencia contratada (kW)
-    # Busca patrones como "5,00 kW", "Potencia contratada: 6.9 kW", "P1: 5,5 kW"
     matches_potencia = re.findall(r'(?:potencia|p1|p2|contratada)[^\d\n]{0,25}(\d{1,2}[,\.]\d{1,3})\s*kw\b', texto, re.IGNORECASE)
     if matches_potencia:
         valores_p = [float(p.replace(',', '.')) for p in matches_potencia if 1.0 <= float(p.replace(',', '.')) <= 15.0]
@@ -48,10 +108,8 @@ def analizar_datos_factura(texto):
             datos["potencia"] = max(valores_p)
 
     # 3. Detectar Precio de la Energía (€/kWh)
-    # Busca cifras decimales típicas de energía cerca de €/kWh o kWh
     matches_precio = re.findall(r'(0[,\.]\d{3,6})\s*(?:€/kwh|eur/kwh)', texto, re.IGNORECASE)
     if not matches_precio:
-        # Búsqueda secundaria por si el formato pone primero kWh y luego el precio unitario
         matches_precio = re.findall(r'kwh\s*[x\*]\s*(0[,\.]\d{3,6})', texto, re.IGNORECASE)
     if matches_precio:
         precios = [float(p.replace(',', '.')) for p in matches_precio if 0.05 <= float(p.replace(',', '.')) <= 0.60]
@@ -79,10 +137,13 @@ def analizar_datos_factura(texto):
 
 # --- INTERFAZ DE USUARIO ---
 st.title("⚡ Auditor de Facturas Eléctricas")
-st.markdown("Sube tu factura en PDF para detectar sobrecostes ocultos en el precio del kWh, exceso de potencia o servicios de mantenimiento innecesarios.")
+st.markdown(
+    '<p class="subtitulo-grande">Sube tu factura en PDF para detectar sobrecostes ocultos en el precio del kWh, exceso de potencia o servicios de mantenimiento innecesarios.</p>',
+    unsafe_allow_html=True
+)
 
 archivo_subido = st.file_uploader(
-    "Arrastra aquí tu factura de la luz (Endesa, Iberdrola, TotalEnergies, Nufri, Repsol...)",
+    "📄 Arrastra aquí o selecciona tu factura de la luz (Endesa, Iberdrola, TotalEnergies, Nufri, Repsol...)",
     type=["pdf"]
 )
 
@@ -149,13 +210,11 @@ st.divider()
 # --- CÁLCULOS Y SEMÁFORO DE DIAGNÓSTICO ---
 st.subheader("2. Resultado de la Auditoría")
 
-# Parámetros de referencia competitiva
 PRECIO_REF = 0.1200       # €/kWh competitivo actual
 POTENCIA_REF = 5.0        # kW estándar vivienda electrificada
 COSTE_KW_ANUAL = 38.0     # Aprox. €/kW·año (peajes + cargos + margen)
 COSTE_EXTRAS_ANUAL = 72.0 # ~6 €/mes promedio en mantenimientos
 
-# Cálculo de sobrecostes anuales
 consumo_anual = consumo_input * 12
 sobrecoste_energia = max(0.0, (precio_kwh_input - PRECIO_REF) * consumo_anual)
 sobrecoste_potencia = max(0.0, (potencia_input - POTENCIA_REF) * COSTE_KW_ANUAL)
@@ -163,7 +222,6 @@ sobrecoste_extras = COSTE_EXTRAS_ANUAL if tiene_extras else 0.0
 
 ahorro_total_anual = sobrecoste_energia + sobrecoste_potencia + sobrecoste_extras
 
-# Lógica del Semáforo
 if precio_kwh_input > 0.16:
     st.error("🔴 **CAMBIAR URGENTE: Estás pagando un precio muy inflado por la energía.**")
 elif precio_kwh_input > 0.13 or potencia_input > 5.5 or tiene_extras:
@@ -171,13 +229,11 @@ elif precio_kwh_input > 0.13 or potencia_input > 5.5 or tiene_extras:
 else:
     st.success("🟢 **TARIFA ÓPTIMA: Tienes un precio competitivo y una potencia bien ajustada.**")
 
-# Métricas principales
 m1, m2, m3 = st.columns(3)
 m1.metric("Tu precio kWh", f"{precio_kwh_input:.4f} €", f"{precio_kwh_input - PRECIO_REF:+.4f} € vs ref.", delta_color="inverse")
 m2.metric("Tu potencia", f"{potencia_input:.2f} kW", f"{potencia_input - POTENCIA_REF:+.2f} kW vs ref.", delta_color="inverse")
 m3.metric("Ahorro anual estimado", f"{ahorro_total_anual:.0f} €/año")
 
-# Desglose de recomendaciones
 st.markdown("### Desglose del diagnóstico:")
 
 if sobrecoste_energia > 0:
@@ -193,7 +249,6 @@ else:
 if tiene_extras:
     st.write(f"- **Servicios Añadidos:** Se han marcado servicios de mantenimiento o seguros extra. Darlos de baja suele suponer un ahorro directo de unos **{COSTE_EXTRAS_ANUAL:.0f} € al año**.")
 
-# Opción para depurar texto si falla alguna comercializadora
 if texto_extraido:
     with st.expander("Ver texto extraído del PDF (Depuración)"):
         st.text(texto_extraido[:3000])
