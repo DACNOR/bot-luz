@@ -1,6 +1,5 @@
 import streamlit as st
 import pdfplumber
-import numpy as np
 from PIL import Image
 import re
 
@@ -96,20 +95,12 @@ div[data-testid="stFileUploader"] section span {
 </style>
 """, unsafe_allow_html=True)
 
-# --- MOTOR OCR PER A CAPTURES I PDF ESCANEJATS ---
-@st.cache_resource
-def cargar_ocr():
-    import easyocr
-    return easyocr.Reader(['es', 'ca', 'en'], gpu=False)
-
+# --- EXTRACCIÓ DE TEXT (PDF I CAPTURES) ---
 def extraer_texto_imagen(imagen_pil):
     try:
-        reader = cargar_ocr()
-        img_array = np.array(imagen_pil.convert("RGB"))
-        lineas = reader.readtext(img_array, detail=0)
-        return "\n".join(lineas)
-    except Exception as e:
-        st.warning(f"No s'ha pogut llegir la imatge automàticament: {e}")
+        import pytesseract
+        return pytesseract.image_to_string(imagen_pil)
+    except Exception:
         return ""
 
 def extraer_texto_archivo(archivo):
@@ -122,7 +113,7 @@ def extraer_texto_archivo(archivo):
                     texto = pagina.extract_text()
                     if texto:
                         texto_completo += texto + "\n"
-            # Si el PDF és una imatge escanejada sense text seleccionable, aplicar OCR
+            # Si el PDF és escanejat sense text seleccionable
             if not texto_completo.strip():
                 archivo.seek(0)
                 with pdfplumber.open(archivo) as pdf:
@@ -142,11 +133,15 @@ def analizar_datos_factura(texto):
         "potencia": 5.0,
         "precio_kwh": 0.14,
         "consumo_kwh": 250,
-        "servicios_detectados": []
+        "servicios_detectados": [],
+        "es_regulada": False,
+        "tiene_bono_social": False
     }
     
     if not texto:
         return datos
+
+    texto_lower = texto.lower()
 
     # 1. Detectar CUPS (Format ES + 16 dígits + 2-4 caràcters)
     match_cups = re.search(r'\bES\d{16}[A-Z0-9]{2,4}\b', texto.replace(" ", ""))
@@ -164,7 +159,7 @@ def analizar_datos_factura(texto):
         if valores_p:
             datos["potencia"] = max(valores_p)
 
-    # 3. Detectar Preu de l'Energia (€/kWh) - Multiidioma i OCR
+    # 3. Detectar Preu de l'Energia (€/kWh)
     matches_precio = re.findall(r'(0[,\.]\d{3,6})\s*(?:€/kwh|eur/kwh|e/kwh)', texto, re.IGNORECASE)
     if not matches_precio:
         matches_precio = re.findall(r'kwh\s*[x\*×]\s*(0[,\.]\d{3,6})', texto, re.IGNORECASE)
@@ -173,7 +168,7 @@ def analizar_datos_factura(texto):
         if precios:
             datos["precio_kwh"] = round(sum(precios) / len(precios), 4)
 
-    # 4. Detectar Consum mensual aproximat (kWh) - Multiidioma (CAT / ES / EN)
+    # 4. Detectar Consum mensual aproximat (kWh) - Multiidioma
     matches_consumo = re.findall(
         r'(?:consum|consumo|consumption|energia activa|energía activa|active energy)[^\d\n]{0,25}(\d{2,4})\s*kwh\b',
         texto,
@@ -184,15 +179,27 @@ def analizar_datos_factura(texto):
         if consumos:
             datos["consumo_kwh"] = max(consumos)
 
-    # 5. Detectar serveis extra / manteniments ocults - Multiidioma
+    # 5. Detectar Mercat Regulat (PVPC) i Bono Social
+    palabras_reguladas = [
+        "baser", "curenergía", "curenergia", "energía xxi", "energia xxi",
+        "régsiti", "regsiti", "comercialitzadora regulada", "comercializadora regulada",
+        "pvpc", "preu voluntari per al petit consumidor", "precio voluntario para el pequeño consumidor"
+    ]
+    if any(p in texto_lower for p in palabras_reguladas):
+        datos["es_regulada"] = True
+
+    if "bono social" in texto_lower or "bo social" in texto_lower:
+        datos["tiene_bono_social"] = True
+        datos["es_regulada"] = True
+
+    # 6. Detectar serveis extra / manteniments de pagament (evitant falsos positius d'avaries de distribuïdora)
     palabras_clave_extras = [
-        "facilita", "manteniment", "mantenimiento", "maintenance",
+        "facilita", "okluz", "servielectric", "servigas",
+        "manteniment", "mantenimiento", "maintenance",
         "protecció", "protección", "protection",
         "assegurança", "seguro", "insurance",
-        "assistència", "asistencia", "assistance",
-        "okluz", "servielectric", "urgències", "urgencias", "reparacions", "reparaciones"
+        "assistència llar", "asistencia hogar", "reparacions elèctriques", "reparaciones eléctricas"
     ]
-    texto_lower = texto.lower()
     for palabra in palabras_clave_extras:
         if palabra in texto_lower:
             datos["servicios_detectados"].append(palabra.capitalize())
@@ -220,18 +227,20 @@ datos_iniciales = {
     "potencia": 5.0,
     "precio_kwh": 0.14,
     "consumo_kwh": 250,
-    "servicios_detectados": []
+    "servicios_detectados": [],
+    "es_regulada": False,
+    "tiene_bono_social": False
 }
 
 texto_extraido = ""
 if archivo_subido is not None:
-    with st.spinner("Llegint la factura (PDF o captura)..."):
+    with st.spinner("Llegint la factura..."):
         texto_extraido = extraer_texto_archivo(archivo_subido)
         datos_iniciales = analizar_datos_factura(texto_extraido)
         if texto_extraido.strip():
             st.success("✅ Factura llegida correctament! Les dades s'han emplenat soles (revisa que coincideixin amb la teva factura):")
         else:
-            st.warning("⚠️ No s'ha pogut llegir el text de la imatge. Assegura't que es vegi nítida o introdueix les dades manualment.")
+            st.warning("⚠️ No s'ha pogut llegir el text de la imatge. Introdueix les dades manualment a les caselles de sota.")
 
 # --- FORMULARI EDITABLE ---
 st.subheader("1. Dades del teu subministrament")
@@ -265,13 +274,21 @@ with col2:
         step=10
     )
 
+tiene_bono_social = st.checkbox(
+    "Tinc Bono Social aplicat (tarifa regulada PVPC)",
+    value=datos_iniciales["tiene_bono_social"]
+)
+
 tiene_extras = st.checkbox(
-    "Tinc serveis de manteniment / assegurances extra a la factura",
+    "Tinc serveis de manteniment / assegurances extra de pagament a la factura",
     value=len(datos_iniciales["servicios_detectados"]) > 0
 )
 
+if datos_iniciales["es_regulada"] and not tiene_bono_social:
+    st.info("🏛️ **Mercat Regulat (PVPC) detectat:** Aquesta factura pertany a una comercialitzadora regulada (Baser, Curenergía, Energía XXI, Régsiti...). Si tens **Bono Social**, marca la casella superior.")
+
 if datos_iniciales["servicios_detectados"]:
-    st.info(f"🔎 Paraules clau detectades a la factura: **{', '.join(set(datos_iniciales['servicios_detectados']))}**")
+    st.info(f"🔎 Serveis extra detectats a la factura: **{', '.join(set(datos_iniciales['servicios_detectados']))}**")
 
 st.divider()
 
@@ -290,7 +307,10 @@ sobrecoste_extras = COSTE_EXTRAS_ANUAL if tiene_extras else 0.0
 
 ahorro_total_anual = sobrecoste_energia + sobrecoste_potencia + sobrecoste_extras
 
-if precio_kwh_input > 0.16:
+# Lògica del Semàfor tenint en compte el Bono Social
+if tiene_bono_social:
+    st.info("🛡️ **BONO SOCIAL ACTIU: No et canviïs de companyia.** Encara que el preu base del kWh sembli alt, l'Estat t'aplica un descompte directe sobre el total de la factura que perdries si marxes al mercat lliure.")
+elif precio_kwh_input > 0.16:
     st.error("🔴 **CANVIAR URGENT: Estàs pagant un preu molt inflat per l'energia.**")
 elif precio_kwh_input > 0.13 or potencia_input > 5.5 or tiene_extras:
     st.warning("🟡 **REVISABLE: La teva tarifa és acceptable, però tens marge clar d'optimització.**")
@@ -300,11 +320,16 @@ else:
 m1, m2, m3 = st.columns(3)
 m1.metric("El teu preu kWh", f"{precio_kwh_input:.4f} €", f"{precio_kwh_input - PRECIO_REF:+.4f} € vs ref.", delta_color="inverse")
 m2.metric("La teva potència", f"{potencia_input:.2f} kW", f"{potencia_input - POTENCIA_REF:+.2f} kW vs ref.", delta_color="inverse")
-m3.metric("Estalvi anual estimat", f"{ahorro_total_anual:.0f} €/any")
+if tiene_bono_social:
+    m3.metric("Estalvi estimat", "Mantenir Bono")
+else:
+    m3.metric("Estalvi anual estimat", f"{ahorro_total_anual:.0f} €/any")
 
 st.markdown("### Desglossament del diagnòstic:")
 
-if sobrecoste_energia > 0:
+if tiene_bono_social:
+    st.write("- **Tarifa Regulada amb Bono Social:** Mantén el contracte a la comercialitzadora de referència (Baser, Curenergía, Energía XXI, Régsiti...). Només revisa que es renovi quan pertoqui i que no tinguis serveis extra afegits.")
+elif sobrecoste_energia > 0:
     st.write(f"- **Terme d'Energia:** Estàs pagant **{precio_kwh_input:.4f} €/kWh** davant d'una tarifa competitiva de **0,1200 €/kWh**. Només en consum estalviaries uns **{sobrecoste_energia:.0f} € a l'any**.")
 else:
     st.write("- **Terme d'Energia:** El teu preu del kWh està en línia amb les millors ofertes del mercat lliure.")
