@@ -40,7 +40,7 @@ div[data-testid="stFileUploader"] label p {
     font-size: 1.2rem !important;
     font-weight: 600 !important;
     color: #FFFFFF !important;
-    margin-bottom: 0.5rem !important;
+    margin-bottom: 0.6rem !important;
 }
 div[data-testid="stNumberInput"] label p,
 div[data-testid="stTextInput"] label p,
@@ -48,10 +48,15 @@ div[data-testid="stCheckbox"] label p {
     font-size: 1.05rem !important;
 }
 
-/* 3. Cápsula grande y muy visible para subir el PDF */
+/* 3. Cápsula grande, centrada y proporcional */
 div[data-testid="stFileUploader"] section {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 1rem !important;
     padding: 2.5rem 2rem !important;
-    min-height: 150px !important;
+    min-height: 170px !important;
     border: 2px dashed #4DA6FF !important;
     border-radius: 16px !important;
     background-color: rgba(77, 166, 255, 0.08) !important;
@@ -61,11 +66,25 @@ div[data-testid="stFileUploader"] section:hover {
     border-color: #FFD700 !important;
     background-color: rgba(255, 215, 0, 0.10) !important;
 }
+
+/* Botón Upload más grande y destacado */
 div[data-testid="stFileUploader"] button {
+    font-size: 1.35rem !important;
+    padding: 0.85rem 2.2rem !important;
+    border-radius: 12px !important;
+    font-weight: 700 !important;
+    border: 1px solid #4DA6FF !important;
+}
+div[data-testid="stFileUploader"] button svg {
+    width: 1.4rem !important;
+    height: 1.4rem !important;
+}
+
+/* Texto "200MB per file • PDF" más grande y legible */
+div[data-testid="stFileUploader"] section small,
+div[data-testid="stFileUploader"] section span {
     font-size: 1.1rem !important;
-    padding: 0.6rem 1.4rem !important;
-    border-radius: 10px !important;
-    font-weight: 600 !important;
+    color: #CCCCCC !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -156,99 +175,4 @@ datos_iniciales = {
 }
 
 texto_extraido = ""
-if archivo_subido is not None:
-    with st.spinner("Analizando el PDF..."):
-        texto_extraido = extraer_texto_pdf(archivo_subido)
-        datos_iniciales = analizar_datos_factura(texto_extraido)
-        if texto_extraido.strip():
-            st.success("✅ PDF leído. Verifica que los datos extraídos coincidan con tu factura:")
-        else:
-            st.warning("⚠️ El PDF parece ser una imagen escaneada. Introduce los datos manualmente en las casillas.")
-
-# --- FORMULARIO EDITABLE ---
-st.subheader("1. Datos de tu suministro")
-col1, col2 = st.columns(2)
-
-with col1:
-    cups_input = st.text_input("Código CUPS (Opcional)", value=datos_iniciales["cups"], placeholder="ES0021...")
-    potencia_input = st.number_input(
-        "Potencia contratada (kW)",
-        min_value=1.0,
-        max_value=20.0,
-        value=float(datos_iniciales["potencia"]),
-        step=0.1,
-        format="%.2f"
-    )
-
-with col2:
-    precio_kwh_input = st.number_input(
-        "Precio de la energía (€/kWh)",
-        min_value=0.01,
-        max_value=1.00,
-        value=float(datos_iniciales["precio_kwh"]),
-        step=0.005,
-        format="%.4f"
-    )
-    consumo_input = st.number_input(
-        "Consumo mensual medio (kWh/mes)",
-        min_value=10,
-        max_value=5000,
-        value=int(datos_iniciales["consumo_kwh"]),
-        step=10
-    )
-
-tiene_extras = st.checkbox(
-    "Tengo servicios de mantenimiento / seguros extra en la factura",
-    value=len(datos_iniciales["servicios_detectados"]) > 0
-)
-
-if datos_iniciales["servicios_detectados"]:
-    st.info(f"🔎 Palabras clave detectadas en el PDF: **{', '.join(set(datos_iniciales['servicios_detectados']))}**")
-
-st.divider()
-
-# --- CÁLCULOS Y SEMÁFORO DE DIAGNÓSTICO ---
-st.subheader("2. Resultado de la Auditoría")
-
-PRECIO_REF = 0.1200       # €/kWh competitivo actual
-POTENCIA_REF = 5.0        # kW estándar vivienda electrificada
-COSTE_KW_ANUAL = 38.0     # Aprox. €/kW·año (peajes + cargos + margen)
-COSTE_EXTRAS_ANUAL = 72.0 # ~6 €/mes promedio en mantenimientos
-
-consumo_anual = consumo_input * 12
-sobrecoste_energia = max(0.0, (precio_kwh_input - PRECIO_REF) * consumo_anual)
-sobrecoste_potencia = max(0.0, (potencia_input - POTENCIA_REF) * COSTE_KW_ANUAL)
-sobrecoste_extras = COSTE_EXTRAS_ANUAL if tiene_extras else 0.0
-
-ahorro_total_anual = sobrecoste_energia + sobrecoste_potencia + sobrecoste_extras
-
-if precio_kwh_input > 0.16:
-    st.error("🔴 **CAMBIAR URGENTE: Estás pagando un precio muy inflado por la energía.**")
-elif precio_kwh_input > 0.13 or potencia_input > 5.5 or tiene_extras:
-    st.warning("🟡 **REVISABLE: Tu tarifa es aceptable, pero tienes margen claro de optimización.**")
-else:
-    st.success("🟢 **TARIFA ÓPTIMA: Tienes un precio competitivo y una potencia bien ajustada.**")
-
-m1, m2, m3 = st.columns(3)
-m1.metric("Tu precio kWh", f"{precio_kwh_input:.4f} €", f"{precio_kwh_input - PRECIO_REF:+.4f} € vs ref.", delta_color="inverse")
-m2.metric("Tu potencia", f"{potencia_input:.2f} kW", f"{potencia_input - POTENCIA_REF:+.2f} kW vs ref.", delta_color="inverse")
-m3.metric("Ahorro anual estimado", f"{ahorro_total_anual:.0f} €/año")
-
-st.markdown("### Desglose del diagnóstico:")
-
-if sobrecoste_energia > 0:
-    st.write(f"- **Término de Energía:** Estás pagando **{precio_kwh_input:.4f} €/kWh** frente a una tarifa competitiva de **0,1200 €/kWh**. Solo en consumo ahorrarías unos **{sobrecoste_energia:.0f} € al año**.")
-else:
-    st.write("- **Término de Energía:** Tu precio del kWh está en línea con las mejores ofertas del mercado libre.")
-
-if potencia_input > 5.5:
-    st.write(f"- **Exceso de Potencia:** Tienes **{potencia_input:.2f} kW**. Para una vivienda estándar (incluso 100% eléctrica), bajar a **5,00 kW** evita que salte el ICP y te ahorra unos **{sobrecoste_potencia:.0f} € al año** en costes fijos.")
-else:
-    st.write(f"- **Potencia Contratada:** Tus **{potencia_input:.2f} kW** están dentro del rango recomendado (≤ 5,5 kW).")
-
-if tiene_extras:
-    st.write(f"- **Servicios Añadidos:** Se han marcado servicios de mantenimiento o seguros extra. Darlos de baja suele suponer un ahorro directo de unos **{COSTE_EXTRAS_ANUAL:.0f} € al año**.")
-
-if texto_extraido:
-    with st.expander("Ver texto extraído del PDF (Depuración)"):
-        st.text(texto_extraido[:3000])
+if archivo_sub
