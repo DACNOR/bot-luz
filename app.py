@@ -2,7 +2,6 @@ import streamlit as st
 import pdfplumber
 import numpy as np
 from PIL import Image
-from rapidocr_onnxruntime import RapidOCR
 import re
 
 # Configuració de la pàgina
@@ -100,15 +99,18 @@ div[data-testid="stFileUploader"] section span {
 # --- MOTOR OCR PER A CAPTURES I PDF ESCANEJATS ---
 @st.cache_resource
 def cargar_ocr():
-    return RapidOCR()
+    import easyocr
+    return easyocr.Reader(['es', 'ca', 'en'], gpu=False)
 
 def extraer_texto_imagen(imagen_pil):
-    ocr = cargar_ocr()
-    img_array = np.array(imagen_pil.convert("RGB"))
-    resultado, _ = ocr(img_array)
-    if not resultado:
+    try:
+        reader = cargar_ocr()
+        img_array = np.array(imagen_pil.convert("RGB"))
+        lineas = reader.readtext(img_array, detail=0)
+        return "\n".join(lineas)
+    except Exception as e:
+        st.warning(f"No s'ha pogut llegir la imatge automàticament: {e}")
         return ""
-    return "\n".join([linea[1] for linea in resultado])
 
 def extraer_texto_archivo(archivo):
     texto_completo = ""
